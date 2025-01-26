@@ -15,13 +15,13 @@ bool SPIDelegate::is_ready() { return true; }
 
 GPIOPin *const NullPin::NULL_PIN = new NullPin();  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-SPIDelegate *SPIComponent::register_device(SPIClient *device, SPIMode mode, SPIBitOrder bit_order, uint32_t data_rate,
-                                           GPIOPin *cs_pin) {
+SPIDelegate *SPIComponent::register_device(SPIClient *device, SPIMode mode, SPIRole role, SPIBitOrder bit_order,
+                                           uint32_t data_rate, GPIOPin *cs_pin) {
   if (this->devices_.count(device) != 0) {
     ESP_LOGE(TAG, "SPI device already registered");
     return this->devices_[device];
   }
-  SPIDelegate *delegate = this->spi_bus_->get_delegate(data_rate, bit_order, mode, cs_pin);  // NOLINT
+  SPIDelegate *delegate = this->spi_bus_->get_delegate(data_rate, bit_order, mode, role, cs_pin);  // NOLINT
   this->devices_[device] = delegate;
   return delegate;
 }
@@ -66,6 +66,7 @@ void SPIComponent::setup() {
 
 void SPIComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "SPI bus:");
+  ESP_LOGCONFIG(TAG, "  Role: %s", this->role_ == ROLE_MASTER ? "master" : "slave");
   LOG_PIN("  CLK Pin: ", this->clk_pin_)
   LOG_PIN("  MISO Pin: ", this->miso_pin_)
   LOG_PIN("  MOSI Pin: ", this->mosi_pin_)
@@ -85,7 +86,49 @@ uint8_t SPIDelegateBitBash::transfer(uint8_t data) { return this->transfer_(data
 
 void SPIDelegateBitBash::write(uint16_t data, size_t num_bits) { this->transfer_(data, num_bits); }
 
-uint16_t SPIDelegateBitBash::transfer_(uint16_t data, size_t num_bits) {
+uint16_t SPIDelegateBitBash::slave_transfer_(uint16_t data, size_t num_bits) {
+  uint16_t out_data = 0;
+
+  for (uint8_t i = 0; i < num_bits; i++) {
+    uint8_t shift;
+
+    if (this->bit_order_ == BIT_ORDER_MSB_FIRST) {
+      shift = num_bits - 1 - i;
+    } else {
+      shift = i;
+    }
+
+    if (this->clock_phase_ == CLOCK_PHASE_LEADING) {
+      this->miso_pin_->digital_write(data & (1 << shift));
+      if (!this->wait_clock_(CLOCK_ASSERTED)) {
+        ESP_LOGD(TAG, "Leading phase clock not asserted within %d ms.", this->timeout_ms_);
+        break;
+      }
+      out_data |= uint16_t(this->mosi_pin_->digital_read()) << shift;
+      if (!this->wait_clock_(CLOCK_DEASSERTED)) {
+        ESP_LOGD(TAG, "Leading phase clock not de-asserted within %d ms.", this->timeout_ms_);
+        break;
+      }
+    } else {  // CLOCK_PHASE_TRAILING
+      if (!this->wait_clock_(CLOCK_ASSERTED)) {
+        ESP_LOGD(TAG, "Trailing phase Clock not asserted within %d ms.", this->timeout_ms_);
+        break;
+      }
+      this->miso_pin_->digital_write(data & (1 << shift));
+      if (!this->wait_clock_(CLOCK_DEASSERTED)) {
+        ESP_LOGD(TAG, "Trailing phase clock not de-asserted within %d ms.", this->timeout_ms_);
+        break;
+      }
+      out_data |= uint16_t(this->mosi_pin_->digital_read()) << shift;
+    }
+  }
+
+  App.feed_wdt();
+
+  return out_data;
+}
+
+uint16_t SPIDelegateBitBash::master_transfer_(uint16_t data, size_t num_bits) {
   uint16_t out_data = 0;
 
   // Clock starts out at idle level
@@ -122,6 +165,13 @@ uint16_t SPIDelegateBitBash::transfer_(uint16_t data, size_t num_bits) {
   App.feed_wdt();
 
   return out_data;
+}
+
+uint16_t SPIDelegateBitBash::transfer_(uint16_t data, size_t num_bits) {
+  if (this->role_ == ROLE_SLAVE)
+    return slave_transfer_(data, num_bits);
+  else
+    return master_transfer_(data, num_bits);
 }
 
 }  // namespace spi
