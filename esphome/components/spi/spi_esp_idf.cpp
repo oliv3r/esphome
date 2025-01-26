@@ -10,9 +10,9 @@ static const size_t MAX_TRANSFER_SIZE = 4092;  // dictated by ESP-IDF API.
 
 class SPIDelegateHw : public SPIDelegate {
  public:
-  SPIDelegateHw(SPIInterface channel, uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, GPIOPin *cs_pin,
-                bool write_only)
-      : SPIDelegate(data_rate, bit_order, mode, cs_pin), channel_(channel), write_only_(write_only) {
+  SPIDelegateHw(SPIInterface channel, uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, SPIRole role,
+                GPIOPin *cs_pin, bool write_only)
+      : SPIDelegate(data_rate, bit_order, mode, role, cs_pin), channel_(channel), write_only_(write_only) {
     spi_device_interface_config_t config = {};
     config.mode = static_cast<uint8_t>(mode);
     config.clock_speed_hz = static_cast<int>(data_rate);
@@ -223,8 +223,9 @@ class SPIBusHw : public SPIBus {
       ESP_LOGE(TAG, "Bus init failed - err %X", err);
   }
 
-  SPIDelegate *get_delegate(uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, GPIOPin *cs_pin) override {
-    return new SPIDelegateHw(this->channel_, data_rate, bit_order, mode, cs_pin,
+  SPIDelegate *get_delegate(uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, SPIRole role,
+                            GPIOPin *cs_pin) override {
+    return new SPIDelegateHw(this->channel_, data_rate, bit_order, mode, role, cs_pin,
                              Utility::get_pin_no(this->sdi_pin_) == -1);
   }
 

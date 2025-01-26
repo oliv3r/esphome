@@ -23,6 +23,7 @@ from esphome.const import (
     CONF_MOSI_PIN,
     CONF_NUMBER,
     CONF_SPI_ID,
+    CONF_TYPE,
     KEY_CORE,
     KEY_TARGET_PLATFORM,
     KEY_VARIANT,
@@ -41,6 +42,7 @@ SPIDevice = spi_ns.class_("SPIDevice")
 SPIDataRate = spi_ns.enum("SPIDataRate")
 SPIMode = spi_ns.enum("SPIMode")
 SPIBitOrder = spi_ns.enum("SPIBitOrder")
+SPIRole = spi_ns.enum("SPIRole")
 
 SPI_DATA_RATE_OPTIONS = {
     80e6: SPIDataRate.DATA_RATE_80MHZ,
@@ -78,12 +80,19 @@ SPI_BIT_ORDERS = {
     "lsb_first": SPIBitOrder.BIT_ORDER_LSB_FIRST,
 }
 
+SPI_ROLE = {
+    "master": SPIRole.ROLE_MASTER,
+    "slave": SPIRole.ROLE_SLAVE,
+}
+
 CONF_SPI_MODE = "spi_mode"
 CONF_SPI_BIT_ORDER = "bit_order"
 CONF_FORCE_SW = "force_sw"
 CONF_INTERFACE = "interface"
 CONF_INTERFACE_INDEX = "interface_index"
 TYPE_SINGLE = "single"
+TYPE_MASTER = "master"
+TYPE_SLAVE = "slave"
 TYPE_QUAD = "quad"
 
 # RP2040 SPI pin assignments are complicated;
@@ -222,6 +231,10 @@ def validate_spi_config(config):
                     f"interface '{interface}' not available here (may be already assigned)"
                 )
             available.remove(index)
+        role = spi[CONF_TYPE]
+        if role == "slave":
+            if spi[CONF_INTERFACE] != "software":
+                spi[CONF_INTERFACE] = "software"
 
     # Second time around:
     # Any specific names and any 'hardware' requests will have already been filled,
@@ -258,27 +271,44 @@ def get_spi_interface(index):
     return "new SPIClass(HSPI)"
 
 
-SPI_SCHEMA = cv.All(
-    cv.Schema(
+SPI_BASE_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(SPIComponent),
+        cv.Optional(CONF_FORCE_SW): cv.invalid(
+            "force_sw is deprecated - use interface: software"
+        ),
+        cv.Optional(CONF_INTERFACE, default="any"): cv.one_of(
+            *sum(get_hw_interface_list(), ["software", "hardware", "any"]),
+            lower=True,
+        ),
+        cv.Optional(CONF_DATA_PINS): cv.invalid(
+            "'data_pins' should be used with 'type: quad' only"
+        ),
+    }
+)
+
+SPI_MASTER_SCHEMA = cv.All(
+    SPI_BASE_SCHEMA.extend(
         {
-            cv.GenerateID(): cv.declare_id(SPIComponent),
             cv.Required(CONF_CLK_PIN): pins.gpio_output_pin_schema,
             cv.Optional(CONF_MISO_PIN): pins.gpio_input_pin_schema,
             cv.Optional(CONF_MOSI_PIN): pins.gpio_output_pin_schema,
-            cv.Optional(CONF_FORCE_SW): cv.invalid(
-                "force_sw is deprecated - use interface: software"
-            ),
-            cv.Optional(CONF_INTERFACE, default="any"): cv.one_of(
-                *sum(get_hw_interface_list(), ["software", "hardware", "any"]),
-                lower=True,
-            ),
-            cv.Optional(CONF_DATA_PINS): cv.invalid(
-                "'data_pins' should be used with 'type: quad' only"
-            ),
         }
     ),
     cv.has_at_least_one_key(CONF_MISO_PIN, CONF_MOSI_PIN),
     cv.only_on([PLATFORM_ESP32, PLATFORM_ESP8266, PLATFORM_RP2040]),
+)
+
+SPI_SLAVE_SCHEMA = cv.All(
+    SPI_BASE_SCHEMA.extend(
+        {
+            cv.Required(CONF_CLK_PIN): pins.gpio_input_pin_schema,
+            cv.Optional(CONF_MISO_PIN): pins.gpio_output_pin_schema,
+            cv.Optional(CONF_MOSI_PIN): pins.gpio_input_pin_schema,
+        }
+    ),
+    cv.has_at_least_one_key(CONF_MISO_PIN, CONF_MOSI_PIN),
+    cv.only_on([PLATFORM_ESP32]),
 )
 
 SPI_QUAD_SCHEMA = cv.All(
@@ -310,10 +340,13 @@ CONFIG_SCHEMA = cv.All(
     cv.ensure_list(
         cv.typed_schema(
             {
-                TYPE_SINGLE: SPI_SCHEMA,
+                TYPE_MASTER: SPI_MASTER_SCHEMA,
+                TYPE_SLAVE: SPI_SLAVE_SCHEMA,
                 TYPE_QUAD: SPI_QUAD_SCHEMA,
+                # For backwards compatibility
+                TYPE_SINGLE: SPI_MASTER_SCHEMA,
             },
-            default_type=TYPE_SINGLE,
+            default_type=TYPE_MASTER,
         )
     ),
     validate_spi_config,
@@ -329,6 +362,11 @@ async def to_code(configs):
     for spi in configs:
         var = cg.new_Pvariable(spi[CONF_ID])
         await cg.register_component(var, spi)
+        if role := spi.get(CONF_TYPE):
+            if role == "master":
+                cg.add(var.set_role(SPIRole.ROLE_MASTER))
+            if role == "slave":
+                cg.add(var.set_role(SPIRole.ROLE_SLAVE))
         clk = await cg.gpio_pin_expression(spi[CONF_CLK_PIN])
         cg.add(var.set_clk(clk))
         if miso := spi.get(CONF_MISO_PIN):
@@ -353,6 +391,7 @@ def spi_device_schema(
     default_mode=cv.UNDEFINED,
     quad=False,
     default_bit_order="msb_first",
+    default_role="master",
 ):
     """Create a schema for an SPI device.
     :param cs_pin_required: If true, make the CS_PIN required in the config.
@@ -371,7 +410,7 @@ def spi_device_schema(
             SPI_MODE_OPTIONS, upper=True
         ),
         cv.Optional(CONF_SPI_BIT_ORDER, default=default_bit_order): cv.enum(
-            SPI_BIT_ORDERS, upper=True
+            SPI_BIT_ORDERS, lower=True
         ),
     }
     if cs_pin_required:
