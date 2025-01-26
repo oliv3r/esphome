@@ -9,8 +9,9 @@ namespace spi {
 static const char *const TAG = "spi-esp-arduino";
 class SPIDelegateHw : public SPIDelegate {
  public:
-  SPIDelegateHw(SPIInterface channel, uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, GPIOPin *cs_pin)
-      : SPIDelegate(data_rate, bit_order, mode, cs_pin), channel_(channel) {}
+  SPIDelegateHw(SPIInterface channel, uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, SPIRole role,
+                GPIOPin *cs_pin)
+      : SPIDelegate(data_rate, bit_order, mode, role, cs_pin), channel_(channel) {}
 
   void begin_transaction() override {
 #ifdef USE_RP2040
@@ -76,8 +77,9 @@ class SPIBusHw : public SPIBus {
 #endif
   }
 
-  SPIDelegate *get_delegate(uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, GPIOPin *cs_pin) override {
-    return new SPIDelegateHw(this->channel_, data_rate, bit_order, mode, cs_pin);
+  SPIDelegate *get_delegate(uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, SPIRole role,
+                            GPIOPin *cs_pin) override {
+    return new SPIDelegateHw(this->channel_, data_rate, bit_order, mode, role, cs_pin);
   }
 
  protected:

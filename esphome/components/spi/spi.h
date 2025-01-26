@@ -101,6 +101,22 @@ enum SPIDataRate : uint32_t {
 };
 
 /**
+ *
+ */
+enum SPIRole {
+  ROLE_MASTER,
+  ROLE_SLAVE,
+};
+
+/*
+ *
+ */
+enum SPIClock {
+  CLOCK_ASSERTED,
+  CLOCK_DEASSERTED,
+};
+
+/**
  * A pin to replace those that don't exist.
  */
 class NullPin : public GPIOPin {
@@ -176,8 +192,8 @@ class SPIDelegate {
  public:
   SPIDelegate() = default;
 
-  SPIDelegate(uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, GPIOPin *cs_pin)
-      : bit_order_(bit_order), data_rate_(data_rate), mode_(mode), cs_pin_(cs_pin) {
+  SPIDelegate(uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, SPIRole role, GPIOPin *cs_pin)
+      : bit_order_(bit_order), data_rate_(data_rate), mode_(mode), role_(role), cs_pin_(cs_pin) {
     if (this->cs_pin_ == nullptr)
       this->cs_pin_ = NullPin::NULL_PIN;
     this->cs_pin_->setup();
@@ -252,6 +268,7 @@ class SPIDelegate {
   SPIBitOrder bit_order_{BIT_ORDER_MSB_FIRST};
   uint32_t data_rate_{1000000};
   SPIMode mode_{MODE0};
+  SPIRole role_{ROLE_MASTER};
   GPIOPin *cs_pin_{NullPin::NULL_PIN};
   static SPIDelegate *const NULL_DELEGATE;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 };
@@ -276,11 +293,12 @@ class SPIDelegateDummy : public SPIDelegate {
  */
 class SPIDelegateBitBash : public SPIDelegate {
  public:
-  SPIDelegateBitBash(uint32_t clock, SPIBitOrder bit_order, SPIMode mode, GPIOPin *cs_pin, GPIOPin *clk_pin,
-                     GPIOPin *mosi_pin, GPIOPin *miso_pin)
-      : SPIDelegate(clock, bit_order, mode, cs_pin), clk_pin_(clk_pin), mosi_pin_(mosi_pin), miso_pin_(miso_pin) {
+  SPIDelegateBitBash(uint32_t clock, SPIBitOrder bit_order, SPIMode mode, SPIRole role, GPIOPin *cs_pin,
+                     GPIOPin *clk_pin, GPIOPin *mosi_pin, GPIOPin *miso_pin)
+      : SPIDelegate(clock, bit_order, mode, role, cs_pin), clk_pin_(clk_pin), mosi_pin_(mosi_pin), miso_pin_(miso_pin) {
     // this calculation is pretty meaningless except at very low bit rates.
     this->wait_cycle_ = uint32_t(arch_get_cpu_freq_hz()) / this->data_rate_ / 2ULL;
+    this->timeout_ms_ = 20;
     this->clock_polarity_ = Utility::get_polarity(this->mode_);
     this->clock_phase_ = Utility::get_phase(this->mode_);
   }
@@ -296,6 +314,7 @@ class SPIDelegateBitBash : public SPIDelegate {
   GPIOPin *mosi_pin_;
   GPIOPin *miso_pin_;
   uint32_t last_transition_{0};
+  uint32_t timeout_ms_;
   uint32_t wait_cycle_;
   SPIClockPolarity clock_polarity_;
   SPIClockPhase clock_phase_;
@@ -305,7 +324,21 @@ class SPIDelegateBitBash : public SPIDelegate {
       continue;
     this->last_transition_ += this->wait_cycle_;
   }
+
+  bool HOT wait_clock_(enum SPIClock clock) {
+    uint32_t start_ms = millis();
+    bool state = (clock == CLOCK_ASSERTED) ? (this->clock_polarity_ == CLOCK_POLARITY_LOW)
+                                           : (this->clock_polarity_ != CLOCK_POLARITY_LOW);
+    while (this->clk_pin_->digital_read() != state) {
+      if ((millis() - start_ms) > this->timeout_ms_)
+        return false;
+    }
+    return true;
+  }
+
   uint16_t transfer_(uint16_t data, size_t num_bits);
+  uint16_t master_transfer_(uint16_t data, size_t num_bits);
+  uint16_t slave_transfer_(uint16_t data, size_t num_bits);
 };
 
 class SPIBus {
@@ -314,8 +347,10 @@ class SPIBus {
 
   SPIBus(GPIOPin *clk, GPIOPin *mosi, GPIOPin *miso) : clk_pin_(clk), mosi_pin_(mosi), miso_pin_(miso) {}
 
-  virtual SPIDelegate *get_delegate(uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, GPIOPin *cs_pin) {
-    return new SPIDelegateBitBash(data_rate, bit_order, mode, cs_pin, this->clk_pin_, this->mosi_pin_, this->miso_pin_);
+  virtual SPIDelegate *get_delegate(uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, SPIRole role,
+                                    GPIOPin *cs_pin) {
+    return new SPIDelegateBitBash(data_rate, bit_order, mode, role, cs_pin, this->clk_pin_, this->mosi_pin_,
+                                  this->miso_pin_);
   }
 
   virtual bool is_hw() { return false; }
@@ -330,9 +365,11 @@ class SPIClient;
 
 class SPIComponent : public Component {
  public:
-  SPIDelegate *register_device(SPIClient *device, SPIMode mode, SPIBitOrder bit_order, uint32_t data_rate,
+  SPIDelegate *register_device(SPIClient *device, SPIMode mode, SPIRole role, SPIBitOrder bit_order, uint32_t data_rate,
                                GPIOPin *cs_pin);
   void unregister_device(SPIClient *device);
+
+  void set_role(SPIRole role) { this->role_ = role; }
 
   void set_clk(GPIOPin *clk) { this->clk_pin_ = clk; }
 
@@ -360,6 +397,7 @@ class SPIComponent : public Component {
   std::vector<uint8_t> data_pins_{};
 
   SPIInterface interface_{};
+  bool role_{ROLE_MASTER};
   bool using_hw_{false};
   const char *interface_name_{nullptr};
   SPIBus *spi_bus_{};
@@ -380,7 +418,8 @@ class SPIClient {
 
   virtual void spi_setup() {
     esph_log_d("spi_device", "mode %u, data_rate %ukHz", (unsigned) this->mode_, (unsigned) (this->data_rate_ / 1000));
-    this->delegate_ = this->parent_->register_device(this, this->mode_, this->bit_order_, this->data_rate_, this->cs_);
+    this->delegate_ =
+        this->parent_->register_device(this, this->mode_, this->role_, this->bit_order_, this->data_rate_, this->cs_);
   }
 
   virtual void spi_teardown() {
@@ -393,6 +432,7 @@ class SPIClient {
  protected:
   SPIBitOrder bit_order_{BIT_ORDER_MSB_FIRST};
   SPIMode mode_{MODE0};
+  SPIRole role_{ROLE_MASTER};
   uint32_t data_rate_{1000000};
   SPIComponent *parent_{nullptr};
   GPIOPin *cs_{nullptr};
@@ -407,7 +447,8 @@ class SPIClient {
  * @tparam CLOCK_PHASE
  * @tparam DATA_RATE
  */
-template<SPIBitOrder BIT_ORDER, SPIClockPolarity CLOCK_POLARITY, SPIClockPhase CLOCK_PHASE, SPIDataRate DATA_RATE>
+template<SPIBitOrder BIT_ORDER, SPIClockPolarity CLOCK_POLARITY, SPIClockPhase CLOCK_PHASE,
+         SPIDataRate DATA_RATE = DATA_RATE_1MHZ>
 class SPIDevice : public SPIClient {
  public:
   SPIDevice() : SPIClient(BIT_ORDER, Utility::get_mode(CLOCK_POLARITY, CLOCK_PHASE), DATA_RATE) {}
@@ -430,6 +471,8 @@ class SPIDevice : public SPIClient {
   void set_bit_order(SPIBitOrder order) { this->bit_order_ = order; }
 
   void set_mode(SPIMode mode) { this->mode_ = mode; }
+
+  void set_role(SPIRole role) { this->role_ = role; }
 
   uint8_t read_byte() { return this->delegate_->transfer(0); }
 
