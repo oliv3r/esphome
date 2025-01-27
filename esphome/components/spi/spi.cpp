@@ -38,10 +38,10 @@ void SPIComponent::unregister_device(SPIClient *device) {
 void SPIComponent::setup() {
   ESP_LOGD(TAG, "Setting up SPI bus...");
 
-  if (this->sdo_pin_ == nullptr)
-    this->sdo_pin_ = NullPin::NULL_PIN;
-  if (this->sdi_pin_ == nullptr)
-    this->sdi_pin_ = NullPin::NULL_PIN;
+  if (this->mosi_pin_ == nullptr)
+    this->mosi_pin_ = NullPin::NULL_PIN;
+  if (this->miso_pin_ == nullptr)
+    this->miso_pin_ = NullPin::NULL_PIN;
   if (this->clk_pin_ == nullptr) {
     ESP_LOGE(TAG, "No clock pin for SPI");
     this->mark_failed();
@@ -50,25 +50,25 @@ void SPIComponent::setup() {
 
   if (this->using_hw_) {
     this->spi_bus_ =
-        SPIComponent::get_bus(this->interface_, this->clk_pin_, this->sdo_pin_, this->sdi_pin_, this->data_pins_);
+        SPIComponent::get_bus(this->interface_, this->clk_pin_, this->mosi_pin_, this->miso_pin_, this->data_pins_);
     if (this->spi_bus_ == nullptr) {
       ESP_LOGE(TAG, "Unable to allocate SPI interface");
       this->mark_failed();
     }
   } else {
-    this->spi_bus_ = new SPIBus(this->clk_pin_, this->sdo_pin_, this->sdi_pin_);  // NOLINT
+    this->spi_bus_ = new SPIBus(this->clk_pin_, this->mosi_pin_, this->miso_pin_);  // NOLINT
     this->clk_pin_->setup();
     this->clk_pin_->digital_write(true);
-    this->sdo_pin_->setup();
-    this->sdi_pin_->setup();
+    this->mosi_pin_->setup();
+    this->miso_pin_->setup();
   }
 }
 
 void SPIComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "SPI bus:");
   LOG_PIN("  CLK Pin: ", this->clk_pin_)
-  LOG_PIN("  SDI Pin: ", this->sdi_pin_)
-  LOG_PIN("  SDO Pin: ", this->sdo_pin_)
+  LOG_PIN("  MISO Pin: ", this->miso_pin_)
+  LOG_PIN("  MOSI Pin: ", this->mosi_pin_)
   for (size_t i = 0; i != this->data_pins_.size(); i++) {
     ESP_LOGCONFIG(TAG, "  Data pin %u: GPIO%d", i, this->data_pins_[i]);
   }
@@ -100,9 +100,9 @@ uint16_t SPIDelegateBitBash::transfer_(uint16_t data, size_t num_bits) {
 
     if (clock_phase_ == CLOCK_PHASE_LEADING) {
       // sampling on leading edge
-      this->sdo_pin_->digital_write(data & (1 << shift));
+      this->mosi_pin_->digital_write(data & (1 << shift));
       this->cycle_clock_();
-      out_data |= uint16_t(this->sdi_pin_->digital_read()) << shift;
+      out_data |= uint16_t(this->miso_pin_->digital_read()) << shift;
       this->clk_pin_->digital_write(!this->clock_polarity_);
       this->cycle_clock_();
       this->clk_pin_->digital_write(this->clock_polarity_);
@@ -110,9 +110,9 @@ uint16_t SPIDelegateBitBash::transfer_(uint16_t data, size_t num_bits) {
       // sampling on trailing edge
       this->cycle_clock_();
       this->clk_pin_->digital_write(!this->clock_polarity_);
-      this->sdo_pin_->digital_write(data & (1 << shift));
+      this->mosi_pin_->digital_write(data & (1 << shift));
       this->cycle_clock_();
-      out_data |= uint16_t(this->sdi_pin_->digital_read()) << shift;
+      out_data |= uint16_t(this->miso_pin_->digital_read()) << shift;
       this->clk_pin_->digital_write(this->clock_polarity_);
     }
   }
