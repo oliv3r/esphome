@@ -274,8 +274,8 @@ class SPIDelegateDummy : public SPIDelegate {
 class SPIDelegateBitBash : public SPIDelegate {
  public:
   SPIDelegateBitBash(uint32_t clock, SPIBitOrder bit_order, SPIMode mode, GPIOPin *cs_pin, GPIOPin *clk_pin,
-                     GPIOPin *sdo_pin, GPIOPin *sdi_pin)
-      : SPIDelegate(clock, bit_order, mode, cs_pin), clk_pin_(clk_pin), sdo_pin_(sdo_pin), sdi_pin_(sdi_pin) {
+                     GPIOPin *mosi_pin, GPIOPin *miso_pin)
+      : SPIDelegate(clock, bit_order, mode, cs_pin), clk_pin_(clk_pin), mosi_pin_(mosi_pin), miso_pin_(miso_pin) {
     // this calculation is pretty meaningless except at very low bit rates.
     this->wait_cycle_ = uint32_t(arch_get_cpu_freq_hz()) / this->data_rate_ / 2ULL;
     this->clock_polarity_ = Utility::get_polarity(this->mode_);
@@ -290,8 +290,8 @@ class SPIDelegateBitBash : public SPIDelegate {
 
  protected:
   GPIOPin *clk_pin_;
-  GPIOPin *sdo_pin_;
-  GPIOPin *sdi_pin_;
+  GPIOPin *mosi_pin_;
+  GPIOPin *miso_pin_;
   uint32_t last_transition_{0};
   uint32_t wait_cycle_;
   SPIClockPolarity clock_polarity_;
@@ -309,18 +309,18 @@ class SPIBus {
  public:
   SPIBus() = default;
 
-  SPIBus(GPIOPin *clk, GPIOPin *sdo, GPIOPin *sdi) : clk_pin_(clk), sdo_pin_(sdo), sdi_pin_(sdi) {}
+  SPIBus(GPIOPin *clk, GPIOPin *mosi, GPIOPin *miso) : clk_pin_(clk), mosi_pin_(mosi), miso_pin_(miso) {}
 
   virtual SPIDelegate *get_delegate(uint32_t data_rate, SPIBitOrder bit_order, SPIMode mode, GPIOPin *cs_pin) {
-    return new SPIDelegateBitBash(data_rate, bit_order, mode, cs_pin, this->clk_pin_, this->sdo_pin_, this->sdi_pin_);
+    return new SPIDelegateBitBash(data_rate, bit_order, mode, cs_pin, this->clk_pin_, this->mosi_pin_, this->miso_pin_);
   }
 
   virtual bool is_hw() { return false; }
 
  protected:
   GPIOPin *clk_pin_{};
-  GPIOPin *sdo_pin_{};
-  GPIOPin *sdi_pin_{};
+  GPIOPin *mosi_pin_{};
+  GPIOPin *miso_pin_{};
 };
 
 class SPIClient;
@@ -333,9 +333,9 @@ class SPIComponent : public Component {
 
   void set_clk(GPIOPin *clk) { this->clk_pin_ = clk; }
 
-  void set_miso(GPIOPin *sdi) { this->sdi_pin_ = sdi; }
+  void set_miso(GPIOPin *miso) { this->miso_pin_ = miso; }
 
-  void set_mosi(GPIOPin *sdo) { this->sdo_pin_ = sdo; }
+  void set_mosi(GPIOPin *mosi) { this->mosi_pin_ = mosi; }
   void set_data_pins(std::vector<uint8_t> pins) { this->data_pins_ = std::move(pins); }
 
   void set_interface(SPIInterface interface) {
@@ -352,8 +352,8 @@ class SPIComponent : public Component {
 
  protected:
   GPIOPin *clk_pin_{nullptr};
-  GPIOPin *sdi_pin_{nullptr};
-  GPIOPin *sdo_pin_{nullptr};
+  GPIOPin *miso_pin_{nullptr};
+  GPIOPin *mosi_pin_{nullptr};
   std::vector<uint8_t> data_pins_{};
 
   SPIInterface interface_{};
@@ -362,7 +362,7 @@ class SPIComponent : public Component {
   SPIBus *spi_bus_{};
   std::map<SPIClient *, SPIDelegate *> devices_;
 
-  static SPIBus *get_bus(SPIInterface interface, GPIOPin *clk, GPIOPin *sdo, GPIOPin *sdi,
+  static SPIBus *get_bus(SPIInterface interface, GPIOPin *clk, GPIOPin *mosi, GPIOPin *miso,
                          const std::vector<uint8_t> &data_pins);
 };
 
