@@ -86,19 +86,21 @@ uint8_t SPIDelegateBitBash::transfer(uint8_t data) { return this->transfer_(data
 void SPIDelegateBitBash::write(uint16_t data, size_t num_bits) { this->transfer_(data, num_bits); }
 
 uint16_t SPIDelegateBitBash::transfer_(uint16_t data, size_t num_bits) {
-  // Clock starts out at idle level
-  this->clk_pin_->digital_write(clock_polarity_);
   uint16_t out_data = 0;
+
+  // Clock starts out at idle level
+  this->clk_pin_->digital_write(this->clock_polarity_);
 
   for (uint8_t i = 0; i != num_bits; i++) {
     uint8_t shift;
-    if (bit_order_ == BIT_ORDER_MSB_FIRST) {
+
+    if (this->bit_order_ == BIT_ORDER_MSB_FIRST) {
       shift = num_bits - 1 - i;
     } else {
       shift = i;
     }
 
-    if (clock_phase_ == CLOCK_PHASE_LEADING) {
+    if (this->clock_phase_ == CLOCK_PHASE_LEADING) {
       // sampling on leading edge
       this->mosi_pin_->digital_write(data & (1 << shift));
       this->cycle_clock_();
@@ -116,7 +118,9 @@ uint16_t SPIDelegateBitBash::transfer_(uint16_t data, size_t num_bits) {
       this->clk_pin_->digital_write(this->clock_polarity_);
     }
   }
+
   App.feed_wdt();
+
   return out_data;
 }
 
