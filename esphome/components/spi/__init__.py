@@ -40,6 +40,7 @@ QuadSPIComponent = spi_ns.class_("QuadSPIComponent", cg.Component)
 SPIDevice = spi_ns.class_("SPIDevice")
 SPIDataRate = spi_ns.enum("SPIDataRate")
 SPIMode = spi_ns.enum("SPIMode")
+SPIBitOrder = spi_ns.enum("SPIBitOrder")
 
 SPI_DATA_RATE_OPTIONS = {
     80e6: SPIDataRate.DATA_RATE_80MHZ,
@@ -73,7 +74,13 @@ SPI_MODE_OPTIONS = {
     "3": SPIMode.MODE3,
 }
 
+SPI_BIT_ORDERS = {
+    "msb_first": SPIBitOrder.BIT_ORDER_MSB_FIRST,
+    "lsb_first": SPIBitOrder.BIT_ORDER_LSB_FIRST,
+}
+
 CONF_SPI_MODE = "spi_mode"
+CONF_SPI_BIT_ORDER = "bit_order"
 CONF_FORCE_SW = "force_sw"
 CONF_INTERFACE = "interface"
 CONF_INTERFACE_INDEX = "interface_index"
@@ -346,12 +353,14 @@ def spi_device_schema(
     default_data_rate=cv.UNDEFINED,
     default_mode=cv.UNDEFINED,
     quad=False,
+    default_bit_order="msb_first",
 ):
     """Create a schema for an SPI device.
     :param cs_pin_required: If true, make the CS_PIN required in the config.
     :param default_data_rate: Optional data_rate to use as default
     :param default_mode Optional. The default SPI mode to use.
     :param quad If set, will require an SPI component configured as quad data bits.
+    :param default_bit_order Optional. The default bit order to use.
     :return: The SPI device schema, `extend` this in your config schema.
     """
     schema = {
@@ -361,6 +370,9 @@ def spi_device_schema(
         cv.Optional(CONF_DATA_RATE, default=default_data_rate): SPI_DATA_RATE_SCHEMA,
         cv.Optional(CONF_SPI_MODE, default=default_mode): cv.enum(
             SPI_MODE_OPTIONS, upper=True
+        ),
+        cv.Optional(CONF_SPI_BIT_ORDER, default=default_bit_order): cv.enum(
+            SPI_BIT_ORDERS, upper=True
         ),
     }
     if cs_pin_required:
@@ -380,6 +392,8 @@ async def register_spi_device(var, config):
         cg.add(var.set_data_rate(config[CONF_DATA_RATE]))
     if CONF_SPI_MODE in config:
         cg.add(var.set_mode(config[CONF_SPI_MODE]))
+    if CONF_SPI_BIT_ORDER in config:
+        cg.add(var.set_bit_order(config[CONF_SPI_BIT_ORDER]))
 
 
 def final_validate_device_schema(name: str, *, require_mosi: bool, require_miso: bool):
