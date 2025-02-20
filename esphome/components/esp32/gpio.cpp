@@ -73,9 +73,29 @@ void ESP32InternalGPIOPin::attach_interrupt(void (*func)(void *), void *arg, gpi
   gpio_isr_handler_add(pin_, func, arg);
 }
 
+static const char *mode_to_str(gpio_mode_t mode) {
+  switch (mode) {
+    case GPIO_MODE_INPUT:
+      return "INPUT";
+    case GPIO_MODE_OUTPUT:
+      return "OUTPUT";
+    case GPIO_MODE_OUTPUT_OD:
+      return "OUTPUT OD";
+    case GPIO_MODE_INPUT_OUTPUT_OD:
+      return "I/O OD";
+    case GPIO_MODE_INPUT_OUTPUT:
+      return "I/O";
+    case GPIO_MODE_DISABLE:
+      return "DISABLE";
+    default:
+      return "Invalid";
+  }
+}
+
 std::string ESP32InternalGPIOPin::dump_summary() const {
   char buffer[32];
-  snprintf(buffer, sizeof(buffer), "GPIO%" PRIu32, static_cast<uint32_t>(pin_));
+  snprintf(buffer, sizeof(buffer), "GPIO%" PRIu32 " (%s%s)", static_cast<uint32_t>(pin_), inverted_ ? "Inv. " : "",
+           mode_to_str(flags_to_mode(flags_)));
   return buffer;
 }
 

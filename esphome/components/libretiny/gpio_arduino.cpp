@@ -63,9 +63,28 @@ void ArduinoInternalGPIOPin::pin_mode(gpio::Flags flags) {
   pinMode(pin_, flags_to_mode(flags));  // NOLINT
 }
 
+static const char *mode_to_str(gpio_mode_t mode) {
+  switch (mode) {
+    case GPIO_MODE_INPUT:
+      return "INPUT";
+    case GPIO_MODE_OUTPUT:
+      return "OUTPUT";
+    case GPIO_MODE_OUTPUT_OD:
+      return "OUTPUT OD";
+    case GPIO_MODE_INPUT_OUTPUT_OD:
+      return "I/O OD";
+    case GPIO_MODE_INPUT_OUTPUT:
+      return "I/O";
+    case GPIO_MODE_DISABLE:
+      return "DISABLE";
+    default:
+      return "Invalid";
+  }
+}
+
 std::string ArduinoInternalGPIOPin::dump_summary() const {
   char buffer[32];
-  snprintf(buffer, sizeof(buffer), "%u", pin_);
+  snprintf(buffer, sizeof(buffer), "%u (%s%s)", pin_, inverted_ ? "Inv. " : "", mode_to_str(flags_to_mode(flags_)));
   return buffer;
 }
 
