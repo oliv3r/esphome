@@ -90,7 +90,7 @@ uint16_t SPIDelegateBitBash::transfer_(uint16_t data, size_t num_bits) {
   this->clk_pin_->digital_write(clock_polarity_);
   uint16_t out_data = 0;
 
-  for (uint8_t i = 0; i != num_bits; i++) {
+  for (uint8_t i = 0; i < num_bits; i++) {
     uint8_t shift;
     if (bit_order_ == BIT_ORDER_MSB_FIRST) {
       shift = num_bits - 1 - i;
