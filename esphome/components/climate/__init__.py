@@ -419,6 +419,12 @@ async def register_climate(var, config):
     await setup_climate_core_(var, config)
 
 
+async def new_climate(config, *args):
+    var = cg.new_Pvariable(config[CONF_ID], *args)
+    await register_climate(var, config)
+    return var
+
+
 CLIMATE_CONTROL_ACTION_SCHEMA = cv.Schema(
     {
         cv.Required(CONF_ID): cv.use_id(Climate),
